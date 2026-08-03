@@ -67,6 +67,8 @@ from agent.conversation_compression import (
 )
 from agent.conversation_loop import INTERRUPT_WAITING_FOR_MODEL_PREFIX
 from agent.i18n import t
+from gateway.config import Platform
+from gateway.history_limits import truncate_api_server_agent_history
 from hermes_cli.config import cfg_get
 from hermes_cli.fallback_config import get_fallback_chain
 
@@ -1241,7 +1243,6 @@ def _build_gateway_agent_history(
 
     observed_context = "\n".join(observed_group_context).strip() or None
     return agent_history, observed_context
-
 
 def _select_cached_agent_history(
     persisted_history: List[Dict[str, Any]],
@@ -22179,6 +22180,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     agent_history = _strip_stale_dangerous_confirmations(
                         _selected, now=time.time()
                     )
+            
+            agent_history = truncate_api_server_agent_history(
+                agent_history,
+                platform=source.platform,
+            )
             
             # Collect MEDIA paths already in history so we can exclude them
             # from the current turn's extraction. This is compression-safe:
