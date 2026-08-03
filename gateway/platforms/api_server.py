@@ -1897,6 +1897,22 @@ class APIServerAdapter(BasePlatformAdapter):
 
         return raw, None
 
+    def _prompt_only_mode_for_request(
+        self,
+        request: "web.Request",
+        gateway_session_key: Optional[str] = None,
+    ) -> bool:
+        """Return request-scoped WebUI prompt-only mode.
+
+        The WebUI sends an explicit header when its checkbox is toggled.
+        Keep the legacy ``webui:`` fallback only for older clients that
+        have not been updated yet.
+        """
+        return _coerce_request_bool(
+            request.headers.get("X-Hermes-WebUI-Prompt-Only"),
+            default=str(gateway_session_key or "").startswith("webui:"),
+        )
+
     # ------------------------------------------------------------------
     # Session DB helper
     # ------------------------------------------------------------------
@@ -2339,6 +2355,7 @@ class APIServerAdapter(BasePlatformAdapter):
         route: Optional[Dict[str, Any]] = None,
         session_model: Optional[str] = None,
         confirmed_runtime_lock: bool = False,
+        prompt_only_mode: bool = False,
     ) -> Any:
         """
         Create an AIAgent instance using the gateway's runtime config.
@@ -2612,7 +2629,7 @@ class APIServerAdapter(BasePlatformAdapter):
             if confirmed_runtime_lock
             else GatewayRunner._load_fallback_model()
         )
-        _prompt_only_mode = str(gateway_session_key or "").startswith("webui:")
+        _prompt_only_mode = bool(prompt_only_mode)
 
         agent_kwargs = {
             "model": model,
@@ -3318,6 +3335,7 @@ class APIServerAdapter(BasePlatformAdapter):
         gateway_session_key, key_err = self._parse_session_key_header(request)
         if key_err is not None:
             return key_err
+        prompt_only_mode = self._prompt_only_mode_for_request(request, gateway_session_key)
         session_id = request.match_info["session_id"]
         session, err = await self._get_existing_session_or_404(session_id)
         if err:
@@ -3398,6 +3416,7 @@ class APIServerAdapter(BasePlatformAdapter):
             requested_runtime=runtime_request.get("requested") or {},
             route_source=runtime_request.get("route_source") or "global",
             confirmed_runtime_lock=lock_active,
+            prompt_only_mode=prompt_only_mode,
             **agent_overrides,
         )
         effective_session_id = result.get("session_id") if isinstance(result, dict) else session_id
@@ -3439,6 +3458,7 @@ class APIServerAdapter(BasePlatformAdapter):
         gateway_session_key, key_err = self._parse_session_key_header(request)
         if key_err is not None:
             return key_err
+        prompt_only_mode = self._prompt_only_mode_for_request(request, gateway_session_key)
         session_id = request.match_info["session_id"]
         session, err = await self._get_existing_session_or_404(session_id)
         if err:
@@ -3922,6 +3942,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 tool_complete_callback=_on_tool_complete,
                 agent_ref=agent_ref,
                 gateway_session_key=gateway_session_key,
+                prompt_only_mode=prompt_only_mode,
                 **agent_overrides,
                 route=route,
             ))
@@ -3943,6 +3964,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 ephemeral_system_prompt=system_prompt,
                 session_id=session_id,
                 gateway_session_key=gateway_session_key,
+                prompt_only_mode=prompt_only_mode,
                 **agent_overrides,
                 route=route,
             )
@@ -4862,6 +4884,7 @@ class APIServerAdapter(BasePlatformAdapter):
         gateway_session_key, key_err = self._parse_session_key_header(request)
         if key_err is not None:
             return key_err
+        prompt_only_mode = self._prompt_only_mode_for_request(request, gateway_session_key)
 
         # Parse request body
         try:
@@ -5034,6 +5057,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 tool_complete_callback=_on_tool_complete,
                 agent_ref=agent_ref,
                 gateway_session_key=gateway_session_key,
+                prompt_only_mode=prompt_only_mode,
                 **agent_overrides,
                 route=route,
             ))
@@ -5069,6 +5093,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 ephemeral_system_prompt=instructions,
                 session_id=session_id,
                 gateway_session_key=gateway_session_key,
+                prompt_only_mode=prompt_only_mode,
                 **agent_overrides,
                 route=route,
             )
@@ -5765,6 +5790,7 @@ class APIServerAdapter(BasePlatformAdapter):
         requested_runtime: Optional[Dict[str, Any]] = None,
         route_source: str = "global",
         confirmed_runtime_lock: bool = False,
+        prompt_only_mode: bool = False,
     ) -> tuple:
         """
         Create an agent and run a conversation in a thread executor.
@@ -5821,6 +5847,7 @@ class APIServerAdapter(BasePlatformAdapter):
                         route=route,
                         session_model=session_model,
                         confirmed_runtime_lock=confirmed_runtime_lock,
+                        prompt_only_mode=prompt_only_mode,
                     )
                     if agent_ref is not None:
                         agent_ref[0] = agent
@@ -6078,6 +6105,7 @@ class APIServerAdapter(BasePlatformAdapter):
         gateway_session_key, key_err = self._parse_session_key_header(request)
         if key_err is not None:
             return key_err
+        prompt_only_mode = self._prompt_only_mode_for_request(request, gateway_session_key)
 
         # Enforce concurrency limit (shared across all agent-serving
         # endpoints; configurable via gateway.api_server.max_concurrent_runs).
@@ -6239,6 +6267,7 @@ class APIServerAdapter(BasePlatformAdapter):
                         requested_provider=agent_overrides.get("requested_provider"),
                         model_options=agent_overrides.get("model_options"),
                         route=route,
+                        prompt_only_mode=prompt_only_mode,
                     )
                 self._active_run_agents[run_id] = agent
 
