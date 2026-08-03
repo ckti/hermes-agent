@@ -5184,6 +5184,28 @@ class TestModelRoutesAgentCreation:
         assert captured["provider"] == "otherprov"
         assert captured["api_key"] == "sk-otherprov"
 
+    def test_webui_gateway_session_uses_prompt_only_mode(self, monkeypatch):
+        captured = {}
+
+        class FakeAgent:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        _patch_create_agent_runtime(monkeypatch, captured, FakeAgent)
+        adapter = _make_routing_adapter({})
+        monkeypatch.setattr(adapter, "_ensure_session_db", lambda: None)
+        monkeypatch.setattr(adapter, "_session_model_override_for", lambda *_: None)
+
+        agent = adapter._create_agent(
+            session_id="s1",
+            gateway_session_key="webui:s1",
+        )
+
+        assert isinstance(agent, FakeAgent)
+        assert captured["ephemeral_system_prompt"] == ""
+        assert getattr(agent, "_prompt_only_mode", False) is True
+        assert agent.ephemeral_system_prompt == ""
+
     def test_no_route_keeps_global_model(self, monkeypatch):
         captured = {}
 

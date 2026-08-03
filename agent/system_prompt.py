@@ -164,6 +164,9 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     session — that's the only way to keep upstream prompt caches
     warm across turns.
     """
+    if getattr(agent, "_prompt_only_mode", False):
+        return {"stable": "", "context": "", "volatile": ""}
+
     # Local import to avoid pulling model_tools at module load.  Tests
     # patch ``run_agent.get_toolset_for_tool`` and similar helpers, so
     # we resolve through ``_ra()`` to honor those patches.

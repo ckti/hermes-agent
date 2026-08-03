@@ -40,12 +40,14 @@ def _captured_context_cwd(agent):
         captured["cwd"] = cwd
         return ""
 
-    with (
-        patch("run_agent.load_soul_md", return_value=""),
-        patch("run_agent.build_nous_subscription_prompt", return_value=""),
-        patch("run_agent.build_environment_hints", return_value=""),
-        patch("run_agent.build_context_files_prompt", side_effect=fake_context_files),
-    ):
+    fake_runtime = SimpleNamespace(
+        load_soul_md=lambda *_args, **_kwargs: "",
+        build_nous_subscription_prompt=lambda *_args, **_kwargs: "",
+        build_environment_hints=lambda *_args, **_kwargs: "",
+        build_context_files_prompt=fake_context_files,
+        build_skills_system_prompt=lambda *_args, **_kwargs: "",
+    )
+    with patch("agent.system_prompt._ra", return_value=fake_runtime):
         build_system_prompt_parts(agent)
     return captured["cwd"]
 
@@ -63,22 +65,26 @@ class TestContextFileCwd:
 
 
 def _stable_prompt(agent):
-    with (
-        patch("run_agent.load_soul_md", return_value=""),
-        patch("run_agent.build_nous_subscription_prompt", return_value=""),
-        patch("run_agent.build_environment_hints", return_value=""),
-        patch("run_agent.build_context_files_prompt", return_value=""),
-    ):
+    fake_runtime = SimpleNamespace(
+        load_soul_md=lambda *_args, **_kwargs: "",
+        build_nous_subscription_prompt=lambda *_args, **_kwargs: "",
+        build_environment_hints=lambda *_args, **_kwargs: "",
+        build_context_files_prompt=lambda *_args, **_kwargs: "",
+        build_skills_system_prompt=lambda *_args, **_kwargs: "",
+    )
+    with patch("agent.system_prompt._ra", return_value=fake_runtime):
         return build_system_prompt_parts(agent)["stable"]
 
 
 def _prompt_parts(agent):
-    with (
-        patch("run_agent.load_soul_md", return_value=""),
-        patch("run_agent.build_nous_subscription_prompt", return_value=""),
-        patch("run_agent.build_environment_hints", return_value=""),
-        patch("run_agent.build_context_files_prompt", return_value=""),
-    ):
+    fake_runtime = SimpleNamespace(
+        load_soul_md=lambda *_args, **_kwargs: "",
+        build_nous_subscription_prompt=lambda *_args, **_kwargs: "",
+        build_environment_hints=lambda *_args, **_kwargs: "",
+        build_context_files_prompt=lambda *_args, **_kwargs: "",
+        build_skills_system_prompt=lambda *_args, **_kwargs: "",
+    )
+    with patch("agent.system_prompt._ra", return_value=fake_runtime):
         return build_system_prompt_parts(agent)
 
 
@@ -118,16 +124,36 @@ class TestCodingContextBlock:
 
 def test_build_system_prompt_records_stable_prefix():
     agent = _make_agent()
-    with (
-        patch("run_agent.load_soul_md", return_value=""),
-        patch("run_agent.build_nous_subscription_prompt", return_value=""),
-        patch("run_agent.build_environment_hints", return_value=""),
-        patch("run_agent.build_context_files_prompt", return_value="context"),
-    ):
+    fake_runtime = SimpleNamespace(
+        load_soul_md=lambda *_args, **_kwargs: "",
+        build_nous_subscription_prompt=lambda *_args, **_kwargs: "",
+        build_environment_hints=lambda *_args, **_kwargs: "",
+        build_context_files_prompt=lambda *_args, **_kwargs: "context",
+        build_skills_system_prompt=lambda *_args, **_kwargs: "",
+    )
+    with patch("agent.system_prompt._ra", return_value=fake_runtime):
         prompt = build_system_prompt(agent)
 
     assert prompt.startswith(agent._cached_system_prompt_static)
     assert prompt[len(agent._cached_system_prompt_static):].startswith("\n\ncontext")
+
+
+def test_prompt_only_mode_returns_empty_prompt():
+    agent = _make_agent(_prompt_only_mode=True)
+    fake_runtime = SimpleNamespace(
+        load_soul_md=lambda *_args, **_kwargs: "should-not-be-used",
+        build_nous_subscription_prompt=lambda *_args, **_kwargs: "should-not-be-used",
+        build_environment_hints=lambda *_args, **_kwargs: "should-not-be-used",
+        build_context_files_prompt=lambda *_args, **_kwargs: "should-not-be-used",
+        build_skills_system_prompt=lambda *_args, **_kwargs: "should-not-be-used",
+    )
+    with patch("agent.system_prompt._ra", return_value=fake_runtime):
+        parts = build_system_prompt_parts(agent)
+        prompt = build_system_prompt(agent)
+
+    assert parts == {"stable": "", "context": "", "volatile": ""}
+    assert prompt == ""
+    assert agent._cached_system_prompt_static == ""
 
 
 def test_coding_prompt_preserves_legacy_workspace_order(monkeypatch):

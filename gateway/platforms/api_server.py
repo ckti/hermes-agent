@@ -2612,6 +2612,7 @@ class APIServerAdapter(BasePlatformAdapter):
             if confirmed_runtime_lock
             else GatewayRunner._load_fallback_model()
         )
+        _prompt_only_mode = str(gateway_session_key or "").startswith("webui:")
 
         agent_kwargs = {
             "model": model,
@@ -2620,7 +2621,7 @@ class APIServerAdapter(BasePlatformAdapter):
             "max_iterations": max_iterations,
             "quiet_mode": True,
             "verbose_logging": False,
-            "ephemeral_system_prompt": ephemeral_system_prompt or None,
+            "ephemeral_system_prompt": "" if _prompt_only_mode else (ephemeral_system_prompt or None),
             "enabled_toolsets": enabled_toolsets,
             "session_id": session_id,
             "platform": "api_server",
@@ -2637,6 +2638,11 @@ class APIServerAdapter(BasePlatformAdapter):
             agent_kwargs["service_tier"] = request_service_tier
 
         agent = AIAgent(**agent_kwargs)
+        if _prompt_only_mode:
+            agent._prompt_only_mode = True
+            agent.ephemeral_system_prompt = ""
+            if hasattr(agent, "_invalidate_system_prompt"):
+                agent._invalidate_system_prompt()
         agent._hermes_api_runtime = {
             "provider": runtime_kwargs.get("provider") or getattr(agent, "provider", "") or "",
             "model": getattr(agent, "model", None) or model,
