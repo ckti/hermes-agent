@@ -128,6 +128,7 @@ CHAT_COMPLETIONS_SSE_KEEPALIVE_SECONDS = 30.0
 MAX_NORMALIZED_TEXT_LENGTH = 65_536  # 64 KB cap for normalized content parts
 MAX_CONTENT_LIST_SIZE = 1_000  # Max items when content is an array
 RESPONSES_AUTO_TRUNCATION_HISTORY_LIMIT = 100
+WEBUI_GATEWAY_CONVERSATION_HISTORY_LIMIT = 24
 _COMPRESSED_SUMMARY_METADATA_KEY = "_compressed_summary"
 
 
@@ -397,6 +398,38 @@ def _auto_truncate_response_history(
                 break
 
     return [conversation_history[index] for index in sorted(kept_indices)]
+
+
+def _truncate_webui_gateway_conversation_history(
+    conversation_history: List[Dict[str, Any]],
+    *,
+    gateway_session_key: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Limit WebUI-originated gateway chats to a compact recent window.
+
+    WebUI already carries the durable transcript in its session store. When it
+    forwards the whole `context_messages` tail to the gateway on every browser
+    turn, the model prompt can balloon into tens of thousands of tokens and
+    cause CPU spillover even for short user inputs.
+
+    Apply a smaller cap only for WebUI sessions so direct API clients keep their
+    existing behavior.
+    """
+    if not gateway_session_key or not str(gateway_session_key).startswith("webui:"):
+        return conversation_history
+    if len(conversation_history) <= WEBUI_GATEWAY_CONVERSATION_HISTORY_LIMIT:
+        return conversation_history
+    truncated = _auto_truncate_response_history(
+        conversation_history,
+        limit=WEBUI_GATEWAY_CONVERSATION_HISTORY_LIMIT,
+    )
+    logger.info(
+        "Truncated WebUI gateway history from %d to %d messages for %s",
+        len(conversation_history),
+        len(truncated),
+        gateway_session_key,
+    )
+    return truncated
 
 
 def _normalize_chat_content(
@@ -3346,6 +3379,10 @@ class APIServerAdapter(BasePlatformAdapter):
             if selection_error:
                 return web.json_response(_openai_error(selection_error), status=400)
         history = await self._conversation_history_for_session(session_id)
+        history = _truncate_webui_gateway_conversation_history(
+            history,
+            gateway_session_key=gateway_session_key,
+        )
         result, usage = await self._run_agent(
             user_message=user_message,
             conversation_history=history,
@@ -4916,6 +4953,10 @@ class APIServerAdapter(BasePlatformAdapter):
         # Truncation support
         if body.get("truncation") == "auto":
             conversation_history = _auto_truncate_response_history(conversation_history)
+        conversation_history = _truncate_webui_gateway_conversation_history(
+            conversation_history,
+            gateway_session_key=gateway_session_key,
+        )
 
         # Reuse session from previous_response_id chain so the dashboard
         # groups the entire conversation under one session entry.
@@ -6099,6 +6140,10 @@ class APIServerAdapter(BasePlatformAdapter):
                             if isinstance(part, dict) and part.get("type") == "text"
                         )
                     conversation_history.append({"role": msg["role"], "content": str(content)})
+        conversation_history = _truncate_webui_gateway_conversation_history(
+            conversation_history,
+            gateway_session_key=gateway_session_key,
+        )
 
         session_id = body.get("session_id") or stored_session_id
         route = self._resolve_route(body.get("model"))
