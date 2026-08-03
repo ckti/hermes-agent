@@ -417,19 +417,17 @@ def _truncate_webui_gateway_conversation_history(
     """
     if not gateway_session_key or not str(gateway_session_key).startswith("webui:"):
         return conversation_history
-    if len(conversation_history) <= WEBUI_GATEWAY_CONVERSATION_HISTORY_LIMIT:
-        return conversation_history
-    truncated = _auto_truncate_response_history(
-        conversation_history,
-        limit=WEBUI_GATEWAY_CONVERSATION_HISTORY_LIMIT,
-    )
-    logger.info(
-        "Truncated WebUI gateway history from %d to %d messages for %s",
-        len(conversation_history),
-        len(truncated),
-        gateway_session_key,
-    )
-    return truncated
+    # WebUI carries the durable transcript on the client side already.  Replaying
+    # the saved tail here duplicates that context inside the agent prompt and
+    # keeps small turns expensive.  Return no replay history for WebUI sessions so
+    # the browser-side toggle can truly keep the prompt to the current turn.
+    if conversation_history:
+        logger.info(
+            "Suppressed WebUI gateway history replay for %s (%d messages)",
+            gateway_session_key,
+            len(conversation_history),
+        )
+    return []
 
 
 def _normalize_chat_content(

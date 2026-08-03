@@ -4816,6 +4816,34 @@ class TestSessionKeyHeader:
             assert call_kwargs["session_id"] == "transcript-xyz"
 
     @pytest.mark.asyncio
+    async def test_webui_session_key_suppresses_replayed_history(self, auth_adapter):
+        """WebUI session keys should not replay old transcript history back into the agent."""
+        mock_result = {"final_response": "ok", "messages": [], "api_calls": 1}
+        app = _create_app(auth_adapter)
+        async with TestClient(TestServer(app)) as cli:
+            with patch.object(auth_adapter, "_run_agent", new_callable=AsyncMock) as mock_run:
+                mock_run.return_value = (mock_result, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+                resp = await cli.post(
+                    "/v1/chat/completions",
+                    headers={
+                        "X-Hermes-Session-Key": "webui:user-42",
+                        "Authorization": "Bearer sk-secret",
+                    },
+                    json={
+                        "model": "hermes-agent",
+                        "messages": [
+                            {"role": "user", "content": "old msg"},
+                            {"role": "assistant", "content": "old reply"},
+                            {"role": "user", "content": "new question"},
+                        ],
+                    },
+                )
+            assert resp.status == 200
+            call_kwargs = mock_run.call_args.kwargs
+            assert call_kwargs["gateway_session_key"] == "webui:user-42"
+            assert call_kwargs["conversation_history"] == []
+
+    @pytest.mark.asyncio
     async def test_session_key_absent_yields_none(self, auth_adapter):
         """Omitting the header passes gateway_session_key=None and doesn't echo."""
         mock_result = {"final_response": "ok", "messages": [], "api_calls": 1}
