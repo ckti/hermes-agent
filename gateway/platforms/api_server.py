@@ -2655,9 +2655,13 @@ class APIServerAdapter(BasePlatformAdapter):
             agent_kwargs["service_tier"] = request_service_tier
 
         agent = AIAgent(**agent_kwargs)
+        agent._prompt_only_mode = _prompt_only_mode
         if _prompt_only_mode:
-            agent._prompt_only_mode = True
             agent.ephemeral_system_prompt = ""
+            if hasattr(agent, "_invalidate_system_prompt"):
+                agent._invalidate_system_prompt()
+        elif ephemeral_system_prompt is not None:
+            agent.ephemeral_system_prompt = ephemeral_system_prompt
             if hasattr(agent, "_invalidate_system_prompt"):
                 agent._invalidate_system_prompt()
         agent._hermes_api_runtime = {
