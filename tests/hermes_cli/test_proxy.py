@@ -14,6 +14,12 @@ import pytest
 from hermes_cli.proxy.adapters import ADAPTERS, get_adapter
 from hermes_cli.proxy.adapters.base import UpstreamAdapter, UpstreamCredential
 from hermes_cli.proxy.adapters.nous_portal import NousPortalAdapter
+from hermes_cli.proxy.context_lite import (
+    ContextLiteConfig,
+    ContextLiteStore,
+    default_store_path,
+    resolve_session_id,
+)
 from hermes_cli.proxy.adapters.xai import XAIGrokAdapter
 
 
@@ -838,6 +844,130 @@ def test_server_strips_client_auth_header():
                     await resp.read()
             assert captured["requests"][0]["auth"] == "Bearer ours"
             assert "SHOULD_NOT_LEAK" not in captured["requests"][0]["auth"]
+        finally:
+            await proxy_runner.cleanup()
+            await upstream_runner.cleanup()
+
+    asyncio.run(run())
+
+
+def test_default_store_path_uses_hermes_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    assert default_store_path() == tmp_path / "proxy" / "context-lite.sqlite3"
+
+
+@pytest.mark.parametrize(
+    "request_body, headers, session_header, expected",
+    [
+        ({"session_id": "body-session"}, {}, "X-Hermes-Session-Id", "body-session"),
+        ({"conversationId": "conversation-body"}, {}, "X-Hermes-Session-Id", "conversation-body"),
+        ({"metadata": {"chat_id": "metadata-chat"}}, {}, "X-Hermes-Session-Id", "metadata-chat"),
+        ({"user": "alice"}, {}, "X-Hermes-Session-Id", "alice"),
+        (
+            {"session_id": "body-session"},
+            {"X-Hermes-Session-Id": "header-session"},
+            "X-Hermes-Session-Id",
+            "header-session",
+        ),
+        (
+            {"metadata": {"session_id": "metadata-session"}},
+            {"X-Test-Session": "header-session"},
+            "X-Test-Session",
+            "header-session",
+        ),
+    ],
+)
+def test_resolve_session_id_precedence(request_body, headers, session_header, expected):
+    assert (
+        resolve_session_id(
+            request_body,
+            headers,
+            session_header=session_header,
+        )
+        == expected
+    )
+
+
+def test_server_context_lite_compacts_and_persists_transcript(tmp_path):
+    async def run():
+        captured: Dict[str, Any] = {"requests": []}
+        upstream_runner, upstream_base = await _start_runner(_build_fake_upstream(captured))
+        store_path = tmp_path / "context-lite.sqlite3"
+        context_lite = ContextLiteConfig(
+            store_path=store_path,
+            session_header="X-Hermes-Session-Id",
+            summary_max_chars=500,
+            preserve_tools=False,
+        )
+        adapter = FakeAdapter(f"{upstream_base}/v1", bearer="real-portal-key")
+        proxy_runner, proxy_base = await _start_runner(
+            create_app(adapter, context_lite=context_lite)
+        )
+
+        payload = {
+            "model": "Hermes-4-70B",
+            "messages": [
+                {"role": "system", "content": "Keep answers brief."},
+                {"role": "developer", "content": "Prefer local context reuse."},
+                {"role": "user", "content": "We are designing a cache layer."},
+                {"role": "assistant", "content": "Use SQLite."},
+                {"role": "user", "content": "Cut the upstream prompt to two messages."},
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"name": "lookup", "parameters": {}},
+                }
+            ],
+            "tool_choice": "auto",
+            "metadata": {"conversationId": "body-session"},
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{proxy_base}/v1/chat/completions",
+                    json=payload,
+                    headers={
+                        "Authorization": "Bearer client-dummy-key",
+                        "X-Hermes-Session-Id": "header-session",
+                    },
+                ) as resp:
+                    assert resp.status == 200
+                    data = await resp.json()
+                    assert data["echoed"] is True
+
+            assert len(captured["requests"]) == 1
+            req = captured["requests"][0]
+            assert req["auth"] == "Bearer real-portal-key"
+
+            forwarded = json.loads(req["body"])
+            assert forwarded["model"] == "Hermes-4-70B"
+            assert forwarded["messages"][0]["role"] == "developer"
+            assert len(forwarded["messages"]) == 2
+            assert forwarded["messages"][1] == {
+                "role": "user",
+                "content": "Cut the upstream prompt to two messages.",
+            }
+
+            instruction = forwarded["messages"][0]["content"]
+            assert "Keep answers brief." in instruction
+            assert "Prefer local context reuse." in instruction
+            assert "Local session recap (stored locally)" in instruction
+            assert "We are designing a cache layer." in instruction
+            assert "Use SQLite." in instruction
+            assert "Cut the upstream prompt to two messages." not in instruction
+            assert "tools" not in forwarded
+            assert "tool_choice" not in forwarded
+
+            store = ContextLiteStore(store_path)
+            assert store.load_messages("header-session") == payload["messages"]
+
+            summary = store.load_summary("header-session")
+            assert "Session recap" in summary
+            assert "We are designing a cache layer." in summary
+            assert "Use SQLite." in summary
+            assert "Cut the upstream prompt to two messages." not in summary
         finally:
             await proxy_runner.cleanup()
             await upstream_runner.cleanup()

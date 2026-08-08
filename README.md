@@ -117,6 +117,15 @@ hermes update       # Update to the latest version
 hermes doctor       # Diagnose any issues
 ```
 
+For a low-context OpenAI-compatible proxy, run:
+
+```bash
+hermes proxy start --context-lite
+```
+
+This keeps the full transcript in a local SQLite store and forwards only a
+recap of prior turns plus the current user message to the upstream model.
+
 📖 **[Full documentation →](https://hermes-agent.nousresearch.com/docs/)**
 
 ---

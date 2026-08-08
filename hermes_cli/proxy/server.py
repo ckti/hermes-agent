@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import json
 from typing import Optional
 
 try:
@@ -26,6 +27,7 @@ except ImportError:
     AIOHTTP_AVAILABLE = False
 
 from hermes_cli.proxy.adapters.base import UpstreamAdapter, UpstreamCredential
+from hermes_cli.proxy.context_lite import ContextLiteConfig, ContextLiteStore, resolve_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +87,11 @@ def _filter_response_headers(headers) -> dict:
     return out
 
 
-def create_app(adapter: UpstreamAdapter) -> "web.Application":
+def create_app(
+    adapter: UpstreamAdapter,
+    *,
+    context_lite: Optional[ContextLiteConfig] = None,
+) -> "web.Application":
     """Build the aiohttp application bound to a specific upstream adapter."""
     if not AIOHTTP_AVAILABLE:
         raise RuntimeError(
@@ -97,15 +103,27 @@ def create_app(adapter: UpstreamAdapter) -> "web.Application":
     # bare-string keys.
     _adapter_key = web.AppKey("adapter", UpstreamAdapter)
     app[_adapter_key] = adapter
+    _context_key = web.AppKey("context_lite", ContextLiteConfig)
+    _store_key = web.AppKey("context_lite_store", ContextLiteStore)
+    if context_lite is not None:
+        app[_context_key] = context_lite
+        app[_store_key] = ContextLiteStore(context_lite.store_path)
 
     async def handle_health(request: "web.Request") -> "web.Response":
-        return web.json_response(
-            {
-                "status": "ok",
-                "upstream": adapter.display_name,
-                "authenticated": adapter.is_authenticated(),
+        health = {
+            "status": "ok",
+            "upstream": adapter.display_name,
+            "authenticated": adapter.is_authenticated(),
+        }
+        if context_lite is not None:
+            health["context_lite"] = {
+                "enabled": True,
+                "store_path": str(context_lite.store_path),
+                "session_header": context_lite.session_header,
+                "summary_max_chars": context_lite.summary_max_chars,
+                "preserve_tools": context_lite.preserve_tools,
             }
-        )
+        return web.json_response(health)
 
     async def handle_proxy(request: "web.Request") -> "web.StreamResponse":
         # Extract the path *after* /v1
@@ -132,6 +150,42 @@ def create_app(adapter: UpstreamAdapter) -> "web.Application":
         # need to forward large multipart uploads we'll switch to streaming
         # the request body too.
         body = await request.read()
+
+        if context_lite is not None and rel_path == "/chat/completions":
+            try:
+                request_json = json.loads(body.decode("utf-8")) if body else {}
+            except Exception:
+                request_json = None
+            if isinstance(request_json, dict):
+                try:
+                    session_id = resolve_session_id(
+                        request_json,
+                        request.headers,
+                        session_header=context_lite.session_header,
+                    )
+                    store = app[_store_key]
+                    compact_body = store.build_compact_request(
+                        request_json,
+                        session_id=session_id,
+                        summary_max_chars=context_lite.summary_max_chars,
+                        preserve_tools=context_lite.preserve_tools,
+                    )
+                    if compact_body is not None:
+                        body = json.dumps(
+                            compact_body,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                        logger.debug(
+                            "proxy: compacted session %s via local recap store (%s bytes)",
+                            session_id,
+                            len(body),
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "proxy: context-lite compaction failed; forwarding raw request: %s",
+                        exc,
+                    )
 
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=300)
 
@@ -248,6 +302,8 @@ async def run_server(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     shutdown_event: Optional[asyncio.Event] = None,
+    *,
+    context_lite: Optional[ContextLiteConfig] = None,
 ) -> None:
     """Run the proxy in the current event loop until shutdown_event is set.
 
@@ -258,7 +314,7 @@ async def run_server(
             "aiohttp is required for `hermes proxy`. Run `hermes setup` to install it."
         )
 
-    app = create_app(adapter)
+    app = create_app(adapter, context_lite=context_lite)
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, host=host, port=port)

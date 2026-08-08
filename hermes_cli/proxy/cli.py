@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 from hermes_cli.proxy.adapters import ADAPTERS, get_adapter
+from hermes_cli.proxy.context_lite import ContextLiteConfig, default_store_path
 from hermes_cli.proxy.server import (
     AIOHTTP_AVAILABLE,
     DEFAULT_HOST,
@@ -52,6 +53,16 @@ def cmd_proxy_start(args: Any) -> int:
 
     host = getattr(args, "host", None) or DEFAULT_HOST
     port = getattr(args, "port", None) or DEFAULT_PORT
+    compact_enabled = bool(getattr(args, "context_lite", False))
+    context_lite = None
+    if compact_enabled:
+        store_path = getattr(args, "context_store", None) or default_store_path()
+        context_lite = ContextLiteConfig(
+            store_path=store_path,
+            session_header=getattr(args, "context_session_header", None) or "X-Hermes-Session-Id",
+            summary_max_chars=int(getattr(args, "context_summary_chars", 1800) or 1800),
+            preserve_tools=bool(getattr(args, "context_preserve_tools", False)),
+        )
 
     print(
         f"Starting Hermes proxy for {adapter.display_name}\n"
@@ -62,9 +73,20 @@ def cmd_proxy_start(args: Any) -> int:
         f"Press Ctrl+C to stop.",
         file=sys.stderr,
     )
+    if context_lite is not None:
+        print(
+            "  Compact context: enabled\n"
+            f"    Store: {context_lite.store_path}\n"
+            f"    Session header: {context_lite.session_header}\n"
+            f"    Summary cap: {context_lite.summary_max_chars} chars\n"
+            f"    Preserve tools: {'yes' if context_lite.preserve_tools else 'no'}",
+            file=sys.stderr,
+        )
+    else:
+        print("  Compact context: disabled", file=sys.stderr)
 
     try:
-        asyncio.run(run_server(adapter, host=host, port=port))
+        asyncio.run(run_server(adapter, host=host, port=port, context_lite=context_lite))
     except KeyboardInterrupt:
         print("\nproxy: stopped", file=sys.stderr)
     except OSError as exc:
@@ -119,6 +141,8 @@ def cmd_proxy(args: Any) -> int:
     print(
         "hermes proxy — local OpenAI-compatible proxy that attaches your\n"
         "OAuth-authenticated provider credentials to outbound requests.\n"
+        "Use --context-lite on `start` to keep the transcript locally and\n"
+        "forward only a recap plus the current user turn.\n"
         "\n"
         "Subcommands:\n"
         "  hermes proxy start [--provider nous|xai] [--host 127.0.0.1] [--port 8645]\n"

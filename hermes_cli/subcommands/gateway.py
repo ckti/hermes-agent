@@ -344,6 +344,32 @@ def build_gateway_parser(
         default=None,
         help="Bind port (default: 8645)",
     )
+    proxy_start.add_argument(
+        "--context-lite",
+        action="store_true",
+        help="Keep a local transcript store and forward only a recap plus the current user turn",
+    )
+    proxy_start.add_argument(
+        "--context-store",
+        default=None,
+        help="SQLite path for the compact-context store (default: ~/.hermes/proxy/context-lite.sqlite3)",
+    )
+    proxy_start.add_argument(
+        "--context-session-header",
+        default="X-Hermes-Session-Id",
+        help="HTTP header used to identify a compact-context session",
+    )
+    proxy_start.add_argument(
+        "--context-summary-chars",
+        type=int,
+        default=1800,
+        help="Maximum recap size forwarded upstream in compact mode",
+    )
+    proxy_start.add_argument(
+        "--context-preserve-tools",
+        action="store_true",
+        help="Keep tool schemas instead of stripping them in compact mode",
+    )
 
     proxy_subparsers.add_parser(
         "status", help="Show which proxy upstreams are ready"

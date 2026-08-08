@@ -86,6 +86,30 @@ def test_gateway_and_proxy_dispatch():
     assert px.func is _h_proxy
 
 
+def test_gateway_proxy_compact_flags_parse():
+    p = _gateway_parser()
+    ns = p.parse_args(
+        [
+            "proxy",
+            "start",
+            "--context-lite",
+            "--context-store",
+            "/tmp/context-lite.sqlite3",
+            "--context-session-header",
+            "X-Test-Session",
+            "--context-summary-chars",
+            "900",
+            "--context-preserve-tools",
+        ]
+    )
+    assert ns.proxy_command == "start"
+    assert ns.context_lite is True
+    assert ns.context_store == "/tmp/context-lite.sqlite3"
+    assert ns.context_session_header == "X-Test-Session"
+    assert ns.context_summary_chars == 900
+    assert ns.context_preserve_tools is True
+
+
 def test_gateway_accept_hooks_flag():
     p = _gateway_parser()
     ns = p.parse_args(["gateway", "run", "--accept-hooks"])
