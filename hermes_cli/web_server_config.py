@@ -142,6 +142,25 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "display.busy_input_mode": _select("Input behavior while agent is running", "interrupt", "queue", "steer"),
     "approvals.mode": _select("Dangerous command approval mode", "manual", "smart", "off"),
     "context.engine": _select("Context management engine", "default", "custom"),
+    "context.send_full_history": {
+        "type": "boolean",
+        "label": "Local Context Mode",
+        "description": "Keep previous conversation turns local instead of sending them to the model.",
+        "category": "agent",
+        "inverted": True,
+    },
+    "context.send_system_prompt": {
+        "type": "boolean",
+        "label": "Send System Prompt",
+        "description": "Send Hermes' system and persona instructions to the model.",
+        "category": "agent",
+    },
+    "context.send_tool_definitions": {
+        "type": "boolean",
+        "label": "Send Tool Definitions",
+        "description": "Send registered tool definitions to the model.",
+        "category": "agent",
+    },
     "human_delay.mode": _select("Simulated typing delay mode", "off", "typing", "fixed"),
     "logging.level": _select("Log level for agent.log", "DEBUG", "INFO", "WARNING", "ERROR"),
     "agent.service_tier": _select(

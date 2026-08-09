@@ -112,7 +112,8 @@ def assemble_api_request(
     are injected only after whitespace normalization, the orphan sweep, thinking-only drop /
     user merge and surrogate stripping, so the same row's bytes never vary across turns."""
     from agent.conversation_loop import (
-        _CODEX_INCOMPLETE_NUDGE, _apply_context_engine_selection, _canonicalize_api_tool_calls,
+        _CODEX_INCOMPLETE_NUDGE, _apply_context_engine_selection, _apply_local_context_mode,
+        _apply_system_prompt_mode, _canonicalize_api_tool_calls,
         _clone_message_for_send, _midturn_request_pressure_tokens, _pressure_with_real_floor,
     )
     from agent.model_metadata import estimate_messages_tokens_rough
@@ -142,6 +143,12 @@ def assemble_api_request(
     api_messages = _apply_context_engine_selection(
         agent, api_messages, messages, _sel_incoming, logger=request_logger
     )
+    # Apply prompt-reduction switches only to the request-local copy. Persisted
+    # history and the cached system prompt remain unchanged.
+    api_messages = _apply_local_context_mode(agent, api_messages, logger=request_logger)
+    api_messages = _apply_system_prompt_mode(agent, api_messages)
+    if getattr(agent, "send_system_prompt", True) is False:
+        effective_system = ""
 
     # Runs unconditionally (not gated on context_compressor) so orphaned tool
     # results from session loading or manual message edits are always caught.
@@ -193,7 +200,11 @@ def assemble_api_request(
     # Build the request-local cache sections LAST, after every transcript mutation;
     # the canonical tool registry stays undecorated. Marked ``content`` becomes text
     # blocks the whitespace pass skips, so the same row's bytes vary across turns.
-    tools_for_api = agent.tools
+    tools_for_api = (
+        agent.tools
+        if getattr(agent, "send_tool_definitions", True) is not False
+        else []
+    )
     if agent._use_prompt_caching and agent.provider != "moa":
         from agent.prompt_caching import envelope_tool_part_cache_markers_supported
 
@@ -245,7 +256,7 @@ def assemble_api_request(
     # overstates the wire by orders of magnitude on a compacted session and fires a 600s local compression
     # the main request never needed (#96995, mirroring the turn-prologue preflight #96644/#96155).
     request_pressure_tokens = _midturn_request_pressure_tokens(
-        agent, api_messages, effective_system or "", approx_tokens
+        agent, api_messages, effective_system or "", approx_tokens, tools_for_api
     )
     # Usage-anchored override: real prompt_tokens (incl. system + tool schemas) +
     # delta estimate replaces the whole-history heuristic when the anchor is fresh.

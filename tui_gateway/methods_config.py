@@ -254,6 +254,21 @@ def _cfg_get_mtime(params):
     return {"mtime": mtime, "mcp_rev": _compute_mcp_rev()}
 
 
+def _cfg_get_context_toggle(params):
+    cfg = _load_cfg()
+    context_cfg = cfg.get("context") if isinstance(cfg, dict) else None
+    context_cfg = context_cfg if isinstance(context_cfg, dict) else {}
+    key = params.get("key", "")
+    config_key, inverted = {
+        "local_context": ("send_full_history", True),
+        "system_prompt": ("send_system_prompt", False),
+        "tool_definitions": ("send_tool_definitions", False),
+    }[key]
+    raw = context_cfg.get(config_key, True)
+    enabled = raw if isinstance(raw, bool) else str(raw).strip().lower() in {"true", "1", "yes", "on"}
+    return {"value": "on" if (not enabled if inverted else enabled) else "off"}
+
+
 # key -> getter(params); bind_module rebinds the table's functions onto server.py's globals.
 _CONFIG_GETTERS = {
     "provider": _cfg_get_provider,
@@ -269,6 +284,9 @@ _CONFIG_GETTERS = {
     "reasoning": _cfg_get_reasoning,
     "fast": _cfg_get_fast,
     "busy": lambda params: {"value": _load_busy_input_mode()},
+    "local_context": _cfg_get_context_toggle,
+    "system_prompt": _cfg_get_context_toggle,
+    "tool_definitions": _cfg_get_context_toggle,
     "approval_mode": lambda params: {"value": _load_approval_mode()},
     "approvals.mode": lambda params: {"value": _load_approval_mode()},
     "details_mode": lambda params: {"value": _display_word("details_mode", "collapsed", _DETAIL_MODES)},

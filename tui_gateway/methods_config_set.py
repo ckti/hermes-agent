@@ -468,6 +468,36 @@ def _set_display_toggle(rid, params, key, value, session):
     return _kv(rid, key, on)
 
 
+def _set_context_toggle(rid, params, key, value, session):
+    config_key, inverted, agent_attr = {
+        "local_context": ("send_full_history", True, "send_full_history"),
+        "system_prompt": ("send_system_prompt", False, "send_system_prompt"),
+        "tool_definitions": ("send_tool_definitions", False, "send_tool_definitions"),
+    }[key]
+    cfg = _load_cfg_raw()
+    context_cfg = cfg.get("context") if isinstance(cfg.get("context"), dict) else {}
+    persisted = context_cfg.get(config_key, True)
+    persisted = persisted if isinstance(persisted, bool) else _word(persisted) in _BOOL_WORDS and _BOOL_WORDS[_word(persisted)]
+    current = not persisted if inverted else persisted
+    raw = _word(value)
+    if raw in {"", "toggle"}:
+        enabled = not current
+    elif raw in {"on", "true", "1", "yes"}:
+        enabled = True
+    elif raw in {"off", "false", "0", "no"}:
+        enabled = False
+    elif raw == "status":
+        return _kv(rid, key, "on" if current else "off")
+    else:
+        return _err(rid, 4002, f"unknown {key} mode (use on|off|status)")
+    _write_config_key(f"context.{config_key}", not enabled if inverted else enabled)
+    for live_session in list(_sessions.values()):
+        live_agent = live_session.get("agent")
+        if live_agent is not None:
+            setattr(live_agent, agent_attr, not enabled if inverted else enabled)
+    return _kv(rid, key, "on" if enabled else "off")
+
+
 # ── dispatch
 
 _CONFIG_SETTERS = {
@@ -477,6 +507,8 @@ _CONFIG_SETTERS = {
     "density": _set_toggle, "battery": _set_toggle, "theme": _set_word,
     "statusbar": _set_toggle, "mouse": _set_toggle, "indicator": _set_word, "voice.voice_chat_mode": _set_word,
     "cwd": _set_cwd, "terminal.cwd": _set_cwd, "workdir": _set_cwd,
+    "local_context": _set_context_toggle, "system_prompt": _set_context_toggle,
+    "tool_definitions": _set_context_toggle,
     "prompt": _set_prompt, "personality": _set_personality, "skin": _set_skin}
 
 # Keys whose sessionless branch writes a different, wider scope than the session branch (config.yaml's

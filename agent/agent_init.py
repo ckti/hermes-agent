@@ -1451,6 +1451,20 @@ def _apply_agent_section(agent, _agent_cfg):
     except (TypeError, ValueError):
         _api_retries = 3
     agent._api_max_retries = _api_retries
+    # Keep the complete transcript local while allowing callers to omit history,
+    # system instructions, or tool schemas from provider requests.
+    _context_cfg = _agent_cfg.get("context", {})
+    if not isinstance(_context_cfg, dict):
+        _context_cfg = {}
+    agent.send_full_history = str(
+        _context_cfg.get("send_full_history", True)
+    ).lower() in {"true", "1", "yes", "on"}
+    agent.send_system_prompt = str(
+        _context_cfg.get("send_system_prompt", True)
+    ).lower() in {"true", "1", "yes", "on"}
+    agent.send_tool_definitions = str(
+        _context_cfg.get("send_tool_definitions", True)
+    ).lower() in {"true", "1", "yes", "on"}
     # Bounded post-exhaustion auto-recovery cycles once retries AND the fallback chain are spent
     # on a transient outage (agent/turn_recovery_autorecover.py). 0 disables the ladder.
     try:
