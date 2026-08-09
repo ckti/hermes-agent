@@ -1114,6 +1114,28 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "description": "Context management engine",
         "options": ["default", "custom"],
     },
+    "context.send_full_history": {
+        "type": "boolean",
+        "label": "Local Context Mode",
+        "description": (
+            "Local context mode. When enabled, previous conversation turns "
+            "stay stored locally and are omitted from provider requests."
+        ),
+        "category": "agent",
+        "inverted": True,
+    },
+    "context.send_system_prompt": {
+        "type": "boolean",
+        "label": "Send System Prompt",
+        "description": "Send Hermes' system and persona instructions to the LLM.",
+        "category": "agent",
+    },
+    "context.send_tool_definitions": {
+        "type": "boolean",
+        "label": "Send Tool Definitions",
+        "description": "Send registered tool definitions to the LLM.",
+        "category": "agent",
+    },
     "human_delay.mode": {
         "type": "select",
         "description": "Simulated typing delay mode",

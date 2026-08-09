@@ -982,6 +982,23 @@ Agent cache pressure: anon RSS 6802MB over budget 6656MB — evicting 5 LRU sess
 
 The context engine controls how conversations are managed when approaching the model's token limit. The built-in `compressor` engine uses lossy summarization (see [Context Compression](/developer-guide/context-compression-and-caching)). Plugin engines can replace it with alternative strategies.
 
+To keep prior turns local and reduce repeated input tokens, set:
+
+```yaml
+context:
+  send_full_history: false
+  send_system_prompt: true
+  send_tool_definitions: false
+```
+
+The complete transcript remains available in local session storage, but each
+LLM request contains only the current user turn and its tool loop when
+`send_full_history` is `false`. Set `send_system_prompt` or
+`send_tool_definitions` to `false` to omit those payload sections independently;
+the latter also disables tool use for that request.
+These settings apply to CLI startup, TUI, desktop, WebUI, and dashboard
+sessions. All three default to `true` for compatibility.
+
 ```yaml
 context:
   engine: "compressor"    # default — built-in lossy summarization

@@ -519,7 +519,10 @@ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
     provider: 'Memory Provider'
   },
   context: {
-    engine: 'Context Engine'
+    engine: 'Context Engine',
+    sendFullHistory: 'Local Context Mode',
+    sendSystemPrompt: 'Send System Prompt',
+    sendToolDefinitions: 'Send Tool Definitions'
   },
   compression: {
     enabled: 'Auto-Compression',
@@ -586,7 +589,10 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
     userProfileEnabled: 'Maintain a compact profile of user preferences.'
   },
   context: {
-    engine: 'Strategy for managing long conversations near the context limit.'
+    engine: 'Strategy for managing long conversations near the context limit.',
+    sendFullHistory: 'Keep previous conversation turns local instead of sending them to the model.',
+    sendSystemPrompt: 'Include Hermes system and persona instructions in provider requests.',
+    sendToolDefinitions: 'Include registered tool schemas in provider requests.'
   },
   compression: {
     enabled: 'Summarize older context when conversations get large.'
@@ -683,6 +689,9 @@ export const SECTIONS: DesktopConfigSection[] = [
       'memory.user_char_limit',
       'memory.provider',
       'context.engine',
+      'context.send_full_history',
+      'context.send_system_prompt',
+      'context.send_tool_definitions',
       'compression.enabled',
       'compression.threshold',
       'compression.target_ratio',

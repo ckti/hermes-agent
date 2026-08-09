@@ -21,6 +21,8 @@ from unittest.mock import MagicMock
 from agent.context_engine import ContextEngine
 from agent.conversation_loop import (
     _apply_context_engine_selection,
+    _apply_local_context_mode,
+    _apply_system_prompt_mode,
     _notify_context_engine_turn_complete,
 )
 
@@ -52,6 +54,50 @@ def _agent_with(engine) -> Any:
     agent.session_id = "test-session"
     agent.context_compressor = engine
     return agent
+
+
+def test_local_context_mode_keeps_system_prompt_and_current_turn_only():
+    agent = _agent_with(_MinimalEngine())
+    agent.send_full_history = False
+    request = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "old"},
+        {"role": "assistant", "content": "old answer"},
+        {"role": "user", "content": "current"},
+        {"role": "assistant", "tool_calls": [{"id": "call-1"}]},
+        {"role": "tool", "tool_call_id": "call-1", "content": "result"},
+    ]
+    out = _apply_local_context_mode(agent, request, logger=MagicMock())
+    assert out == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "current"},
+        {"role": "assistant", "tool_calls": [{"id": "call-1"}]},
+        {"role": "tool", "tool_call_id": "call-1", "content": "result"},
+    ]
+    assert request[1]["content"] == "old"
+
+
+def test_local_context_mode_defaults_to_full_history():
+    agent = _agent_with(_MinimalEngine())
+    request = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+    assert _apply_local_context_mode(agent, request, logger=MagicMock()) is request
+
+
+def test_system_prompt_mode_can_omit_system_and_developer_messages():
+    agent = _agent_with(_MinimalEngine())
+    agent.send_system_prompt = False
+    request = [
+        {"role": "system", "content": "system"},
+        {"role": "developer", "content": "developer"},
+        {"role": "user", "content": "hello"},
+    ]
+    assert _apply_system_prompt_mode(agent, request) == [request[-1]]
+
+
+def test_system_prompt_mode_defaults_to_sending_prompt():
+    agent = _agent_with(_MinimalEngine())
+    request = [{"role": "system", "content": "system"}, {"role": "user", "content": "hello"}]
+    assert _apply_system_prompt_mode(agent, request) is request
 
 
 REQUEST = [
@@ -245,8 +291,6 @@ def test_on_turn_complete_called_with_snapshot_and_meta():
     assert captured["usage"] == {"total_tokens": 12}
     assert captured["kwargs"]["turn_id"] == "t1"
     assert captured["kwargs"]["api_call_count"] == 1
-
-
 
 
 

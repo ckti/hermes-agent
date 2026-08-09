@@ -1,6 +1,7 @@
 export interface ConfigFieldSchema {
   category?: string
   description?: string
+  label?: string
   options?: unknown[]
   /** When true, renders a SearchableSelect (Popover + cmdk) instead of the
    *  closed `<Select>` dropdown. For large option lists like IANA timezones. */
@@ -8,6 +9,8 @@ export interface ConfigFieldSchema {
   /** When true, a searchable select prepends a "clear" item that resets the
    *  value to ''. Matches the existing <Select> EMPTY_SELECT_VALUE pattern. */
   clearable?: boolean
+  /** Render the switch as the inverse of the persisted boolean value. */
+  inverted?: boolean
   type?: 'boolean' | 'list' | 'number' | 'select' | 'string' | 'text'
 }
 

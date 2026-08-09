@@ -78,6 +78,42 @@ const reasoningConfigPayload = (arg: string, sid: string) => {
 
 export const sessionCommands: SlashCommand[] = [
   {
+    help: 'keep conversation context local and send only the active turn to the LLM',
+    name: 'local-context',
+    usage: '/local-context [on|off|status]',
+    run: (arg, ctx) => {
+      ctx.gateway
+        .rpc<ConfigSetResponse>('config.set', { key: 'local_context', value: arg.trim() || 'toggle' })
+        .then(ctx.guarded<ConfigSetResponse>(r => ctx.transcript.sys(`local context → ${r.value}`)))
+        .catch(ctx.guardedErr)
+    }
+  },
+
+  {
+    help: 'include or omit Hermes system and persona instructions in provider requests',
+    name: 'system-prompt',
+    usage: '/system-prompt [on|off|status]',
+    run: (arg, ctx) => {
+      ctx.gateway
+        .rpc<ConfigSetResponse>('config.set', { key: 'system_prompt', value: arg.trim() || 'toggle' })
+        .then(ctx.guarded<ConfigSetResponse>(r => ctx.transcript.sys(`system prompt → ${r.value}`)))
+        .catch(ctx.guardedErr)
+    }
+  },
+
+  {
+    help: 'include or omit registered tool definitions in provider requests',
+    name: 'tool-definitions',
+    usage: '/tool-definitions [on|off|status]',
+    run: (arg, ctx) => {
+      ctx.gateway
+        .rpc<ConfigSetResponse>('config.set', { key: 'tool_definitions', value: arg.trim() || 'toggle' })
+        .then(ctx.guarded<ConfigSetResponse>(r => ctx.transcript.sys(`tool definitions → ${r.value}`)))
+        .catch(ctx.guardedErr)
+    }
+  },
+
+  {
     aliases: ['bg', 'btw'],
     help: 'launch a background prompt',
     name: 'background',

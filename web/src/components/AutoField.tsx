@@ -89,7 +89,9 @@ export function AutoField({
   onChange,
 }: AutoFieldProps) {
   const rawLabel = schemaKey.split(".").pop() ?? schemaKey;
-  const label = rawLabel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const label = schema.label
+    ? String(schema.label)
+    : rawLabel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
   if (isRecord(value) || (Array.isArray(value) && value.some((item) => isRecord(item)))) {
     return (
@@ -108,7 +110,10 @@ export function AutoField({
           <Label className="text-sm">{label}</Label>
           <FieldHint schema={schema} schemaKey={schemaKey} />
         </div>
-        <Switch checked={!!value} onCheckedChange={onChange} />
+        <Switch
+          checked={schema.inverted ? !Boolean(value) : Boolean(value)}
+          onCheckedChange={(checked) => onChange(schema.inverted ? !checked : checked)}
+        />
       </div>
     );
   }

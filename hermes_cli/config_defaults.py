@@ -1736,6 +1736,13 @@ DEFAULT_CONFIG = {
     # a plugin in plugins/context_engine/<name>/ or ~/.hermes/plugins/.
     "context": {
         "engine": "compressor",
+        # Keep the complete transcript in local session storage, but only send
+        # the active user turn (plus its tool loop) to the provider.
+        "send_full_history": True,
+        # Send Hermes' system/persona instructions with each provider request.
+        "send_system_prompt": True,
+        # Send the registered tool schemas with each provider request.
+        "send_tool_definitions": True,
         # Return freed glibc allocator pages after long-running agent/TUI
         # cleanup boundaries. Unsupported platforms are safe no-ops.
         "memory_trim": {

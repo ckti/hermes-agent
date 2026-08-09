@@ -1557,6 +1557,67 @@ def _apply_context_engine_selection(
     return api_messages
 
 
+def _apply_local_context_mode(
+    agent: Any,
+    api_messages: List[Dict[str, Any]],
+    *,
+    logger: Any,
+) -> List[Dict[str, Any]]:
+    """Filter only the per-request copy when local-context mode is enabled.
+
+    The complete transcript remains owned by the normal persistence path. The
+    provider sees the system/developer instructions followed by the latest
+    user turn and everything after it (including assistant tool calls and tool
+    results). If the request cannot be reduced safely, preserve the normal
+    request rather than sending an incomplete turn.
+    """
+    if getattr(agent, "send_full_history", True) is not False:
+        return api_messages
+    if not isinstance(api_messages, list) or not api_messages:
+        return api_messages
+
+    latest_user_idx = next(
+        (
+            idx
+            for idx in range(len(api_messages) - 1, -1, -1)
+            if isinstance(api_messages[idx], dict)
+            and api_messages[idx].get("role") == "user"
+        ),
+        None,
+    )
+    if latest_user_idx is None:
+        logger.warning(
+            "Local context mode could not find the active user turn; "
+            "sending the normal request"
+        )
+        return api_messages
+
+    prefix = [
+        message
+        for message in api_messages[:latest_user_idx]
+        if isinstance(message, dict)
+        and message.get("role") in {"system", "developer"}
+    ]
+    return prefix + api_messages[latest_user_idx:]
+
+
+def _apply_system_prompt_mode(
+    agent: Any,
+    api_messages: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Omit system/developer messages from the outbound request when disabled."""
+    if getattr(agent, "send_system_prompt", True) is not False:
+        return api_messages
+    return [
+        message
+        for message in api_messages
+        if not (
+            isinstance(message, dict)
+            and message.get("role") in {"system", "developer"}
+        )
+    ]
+
+
 def _notify_context_engine_turn_complete(
     agent: Any,
     messages: List[Dict[str, Any]],
@@ -2154,7 +2215,9 @@ def run_conversation(
         # prefix into content blocks on the wire, but the stored string and
         # its byte-stability remain unchanged.
         effective_system = active_system_prompt or ""
-        if agent.ephemeral_system_prompt:
+        if getattr(agent, "send_system_prompt", True) is False:
+            effective_system = ""
+        elif agent.ephemeral_system_prompt:
             effective_system = (effective_system + "\n\n" + agent.ephemeral_system_prompt).strip()
         if effective_system:
             api_messages = [{"role": "system", "content": effective_system}] + api_messages
@@ -2240,6 +2303,12 @@ def run_conversation(
             _sel_incoming,
             logger=request_logger,
         )
+        # Apply this after optional plugin selection so the user-facing switch
+        # cannot accidentally reintroduce older transcript turns.
+        api_messages = _apply_local_context_mode(
+            agent, api_messages, logger=request_logger
+        )
+        api_messages = _apply_system_prompt_mode(agent, api_messages)
 
         # Safety net: strip orphaned tool results / add stubs for missing
         # results before sending to the API.  Runs unconditionally — not
@@ -2302,7 +2371,11 @@ def run_conversation(
         # exactly the point the breakpoints were meant to protect. Marking
         # last also keeps breakpoints off messages that the orphan sweep or
         # the thinking-only drop is about to remove or merge away.
-        tools_for_api = agent.tools
+        tools_for_api = (
+            agent.tools
+            if getattr(agent, "send_tool_definitions", True) is not False
+            else []
+        )
         if agent._use_prompt_caching and agent.provider != "moa":
             _static_system_prefix = getattr(agent, "_cached_system_prompt_static", None)
             _initial_cache_plan = build_prompt_cache_plan(
@@ -2356,7 +2429,7 @@ def run_conversation(
         # total_chars is a rough (~) proxy — verbose log + hook metric only.
         approx_tokens = estimate_messages_tokens_rough(api_messages)
         request_pressure_tokens = approx_tokens + (
-            _estimate_tools_tokens_rough(agent.tools) if agent.tools else 0
+            _estimate_tools_tokens_rough(tools_for_api) if tools_for_api else 0
         )
         total_chars = approx_tokens * 4
         # Stash this request's rough estimate so update_from_response() can

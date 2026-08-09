@@ -11700,6 +11700,45 @@ def _(rid, params: dict) -> dict:
         _write_config_key("display.busy_input_mode", raw)
         return _ok(rid, {"key": key, "value": raw})
 
+    if key in {"local_context", "system_prompt", "tool_definitions"}:
+        cfg = _load_cfg()
+        context_cfg = cfg.get("context") if isinstance(cfg, dict) else None
+        context_cfg = context_cfg if isinstance(context_cfg, dict) else {}
+        setting = {
+            "local_context": ("send_full_history", True, "send_full_history"),
+            "system_prompt": ("send_system_prompt", False, "send_system_prompt"),
+            "tool_definitions": ("send_tool_definitions", False, "send_tool_definitions"),
+        }[key]
+        config_key, inverted, agent_attr = setting
+        raw_persisted = context_cfg.get(config_key, True)
+        persisted = (
+            raw_persisted
+            if isinstance(raw_persisted, bool)
+            else str(raw_persisted).strip().lower() in {"true", "1", "yes", "on"}
+        )
+        current = not persisted if inverted else persisted
+        raw = str(value or "").strip().lower()
+        if raw in {"", "toggle"}:
+            enabled = not current
+        elif raw in {"on", "true", "1", "yes"}:
+            enabled = True
+        elif raw in {"off", "false", "0", "no"}:
+            enabled = False
+        elif raw == "status":
+            enabled = current
+            return _ok(rid, {"key": key, "value": "on" if enabled else "off"})
+        else:
+            return _err(rid, 4002, f"unknown {key} mode (use on|off|status)")
+
+        _write_config_key(f"context.{config_key}", not enabled if inverted else enabled)
+        # Apply immediately to agents already owned by this TUI gateway. New
+        # agents read the persisted config during init_agent().
+        for live_session in list(_sessions.values()):
+            live_agent = live_session.get("agent")
+            if live_agent is not None:
+                setattr(live_agent, agent_attr, not enabled if inverted else enabled)
+        return _ok(rid, {"key": key, "value": "on" if enabled else "off"})
+
     if key == "verbose":
         cycle = ["off", "new", "all", "verbose"]
         cur = (

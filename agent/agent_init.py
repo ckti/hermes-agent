@@ -1936,6 +1936,20 @@ def init_agent(
     # Initialize context compressor for automatic context management
     # Compresses conversation when approaching model's context limit
     # Configuration via config.yaml (compression section)
+    _context_cfg = _agent_cfg.get("context", {})
+    if not isinstance(_context_cfg, dict):
+        _context_cfg = {}
+    # Session agents may run under different gateway profiles, so this is an
+    # agent attribute rather than a process-global switch.
+    agent.send_full_history = str(
+        _context_cfg.get("send_full_history", True)
+    ).lower() in {"true", "1", "yes", "on"}
+    agent.send_system_prompt = str(
+        _context_cfg.get("send_system_prompt", True)
+    ).lower() in {"true", "1", "yes", "on"}
+    agent.send_tool_definitions = str(
+        _context_cfg.get("send_tool_definitions", True)
+    ).lower() in {"true", "1", "yes", "on"}
     _compression_cfg = _agent_cfg.get("compression", {})
     if not isinstance(_compression_cfg, dict):
         _compression_cfg = {}

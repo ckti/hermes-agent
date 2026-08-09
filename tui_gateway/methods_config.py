@@ -266,6 +266,27 @@ def _(rid, params: dict) -> dict:
         return _ok(rid, {"value": "fast" if tier == "priority" else "normal"})
     if key == "busy":
         return _ok(rid, {"value": _load_busy_input_mode()})
+    if key in {"local_context", "system_prompt", "tool_definitions"}:
+        cfg = _load_cfg()
+        context_cfg = cfg.get("context") if isinstance(cfg, dict) else None
+        context_cfg = context_cfg if isinstance(context_cfg, dict) else {}
+        config_key, inverted = {
+            "local_context": ("send_full_history", True),
+            "system_prompt": ("send_system_prompt", False),
+            "tool_definitions": ("send_tool_definitions", False),
+        }[key]
+        raw_enabled = context_cfg.get(config_key, True)
+        enabled = (
+            raw_enabled
+            if isinstance(raw_enabled, bool)
+            else str(raw_enabled).strip().lower() in {"true", "1", "yes", "on"}
+        )
+        if inverted:
+            enabled = not enabled
+        return _ok(
+            rid,
+            {"value": "on" if enabled else "off"},
+        )
     if key in {"approval_mode", "approvals.mode"}:
         try:
             return _ok(rid, {"value": _load_approval_mode()})

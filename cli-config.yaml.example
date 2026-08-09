@@ -781,6 +781,15 @@ prompt_caching:
 #     # max_concurrency: 2    # Optional: cap simultaneous compression calls
 
 # =============================================================================
+# Keep conversation history on this machine and optionally omit the system
+# prompt or tool schemas from requests. These reduce input tokens, but the
+# model loses the omitted instructions/capabilities for those requests.
+# Applies to CLI startup, TUI, desktop, WebUI, and dashboard sessions.
+context:
+  send_full_history: true
+  send_system_prompt: true
+  send_tool_definitions: true
+
 # Persistent Memory
 # =============================================================================
 # Bounded curated memory injected into the system prompt every session.

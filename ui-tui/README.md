@@ -103,6 +103,13 @@ npm run test:watch
 - `commands/setup.ts` — `/setup`
 - `commands/debug.ts` — `/heapdump`, `/mem`
 
+`/local-context on|off|status` toggles whether prior turns are sent to the
+LLM. The transcript remains in local session storage; only the active turn and
+its tool loop are sent when enabled.
+
+`/system-prompt on|off|status` and `/tool-definitions on|off|status` independently
+control whether Hermes sends its system instructions and registered tool schemas.
+
 The top-level `app.tsx` composes these into the Ink tree with `Static` transcript output, a live streaming assistant row, prompt overlays, queue preview, status rule, input line, and completion list.
 
 State managed at the top level includes:
