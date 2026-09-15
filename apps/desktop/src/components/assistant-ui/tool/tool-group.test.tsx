@@ -1,6 +1,6 @@
-import { AssistantRuntimeProvider, type ThreadMessage, useExternalStoreRuntime } from '@assistant-ui/react'
+import { type ThreadMessage } from '@assistant-ui/react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { $displayTimestamps } from '@/store/display-timestamps'
 import { clearAllPrompts, setApprovalRequest } from '@/store/prompts'
@@ -8,6 +8,7 @@ import { $activeSessionId } from '@/store/session'
 import { clearDismissedToolRows } from '@/store/tool-dismiss'
 import { $toolDisclosureStates } from '@/store/tool-view'
 
+import { stubThreadEnvironment, stubThreadViewportSize, ThreadRuntime } from '../test-utils'
 import { Thread } from '../thread'
 import { formatTimelineRange } from '../thread/timestamp'
 
@@ -25,6 +26,7 @@ const createdAt = new Date('2026-06-03T00:00:00.000Z')
 
 const resizeObservers = new Set<TestResizeObserver>()
 
+// This suite drives resizes by hand, so it needs observers it can reach.
 class TestResizeObserver {
   private target: Element | null = null
 
@@ -43,38 +45,9 @@ class TestResizeObserver {
   }
 }
 
+stubThreadEnvironment()
+stubThreadViewportSize()
 vi.stubGlobal('ResizeObserver', TestResizeObserver)
-vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
-  window.setTimeout(() => callback(performance.now()), 0)
-)
-vi.stubGlobal('cancelAnimationFrame', (id: number) => window.clearTimeout(id))
-
-Element.prototype.scrollTo = function scrollTo() {}
-
-Element.prototype.animate = function animate() {
-  return {
-    cancel: () => {},
-    finished: Promise.resolve()
-  } as unknown as Animation
-}
-
-function stubOffsetDimension(
-  prop: 'offsetHeight' | 'offsetWidth',
-  clientProp: 'clientHeight' | 'clientWidth',
-  fallback: number
-) {
-  const previous = Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop)
-
-  Object.defineProperty(HTMLElement.prototype, prop, {
-    configurable: true,
-    get() {
-      return previous?.get?.call(this) || (this as HTMLElement)[clientProp] || fallback
-    }
-  })
-}
-
-stubOffsetDimension('offsetWidth', 'clientWidth', 800)
-stubOffsetDimension('offsetHeight', 'clientHeight', 600)
 
 // A running assistant message with two tools: a completed read_file plus a
 // pending terminal (no result), rendered as a flat two-row list.
@@ -406,19 +379,11 @@ function movedOnMessage(): ThreadMessage {
   } as unknown as ThreadMessage
 }
 
-function GroupHarness({ message }: { message: ThreadMessage }) {
-  const runtime = useExternalStoreRuntime<ThreadMessage>({
-    messages: [message],
-    isRunning: message.status?.type === 'running',
-    onNew: async () => {}
-  })
-
-  return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <Thread />
-    </AssistantRuntimeProvider>
-  )
-}
+const GroupHarness = ({ message }: { message: ThreadMessage }) => (
+  <ThreadRuntime messages={[message]}>
+    <Thread />
+  </ThreadRuntime>
+)
 
 beforeEach(() => {
   clearAllPrompts()
@@ -513,14 +478,56 @@ describe('live tool run', () => {
     })
   })
 
-  it('cannot be collapsed while a tool is still running', async () => {
-    const { container } = render(<GroupHarness message={groupedPendingMessage()} />)
+  it('honors explicit disclosure across live updates and completion', async () => {
+    const message = groupedPendingMessage()
+    const { container, rerender } = render(<GroupHarness message={message} />)
+    const toggle = () => container.querySelector('[data-tool-summary] button[aria-expanded]') as HTMLButtonElement
 
-    await waitFor(() => {
-      expect(container.querySelector('[data-tool-summary]')).not.toBeNull()
-    })
+    await waitFor(() => expect(toggle()).not.toBeNull())
+    fireEvent.click(toggle())
+    expect(toggle().getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector('[data-tool-ticker]')).toBeNull()
+    fireEvent.click(toggle())
+    const row = container.querySelector('[data-tool-ticker] [data-tool-row] button[aria-expanded="false"]')
+    expect(row).not.toBeNull()
+    fireEvent.click(row as Element)
+    await waitFor(() => expect(container.querySelector('[data-tool-ticker]')).toBeNull())
 
-    expect(container.querySelector('[data-tool-summary] button[aria-expanded]')).toBeNull()
+    const next = {
+      ...message,
+      content: [
+        ...message.content,
+        {
+          type: 'tool-call',
+          toolCallId: 'read-next',
+          toolName: 'read_file',
+          args: { path: '/tmp/next' },
+          argsText: '{}'
+        }
+      ]
+    } as ThreadMessage
+
+    rerender(<GroupHarness message={next} />)
+    await waitFor(() => expect(container.querySelectorAll('[data-tool-row]')).toHaveLength(3))
+    rerender(<GroupHarness message={{ ...next, status: { type: 'complete', reason: 'stop' } }} />)
+    await waitFor(() => expect(toggle().getAttribute('aria-expanded')).toBe('true'))
+    fireEvent.click(toggle())
+    expect(container.querySelectorAll('[data-tool-row]')).toHaveLength(0)
+  })
+
+  it('updates named skill summaries when identifying arguments arrive late', async () => {
+    const message = groupedPendingMessage()
+    const first = { ...message.content[0], toolName: 'skill_view', args: {}, result: { success: true } }
+
+    const { container, rerender } = render(
+      <GroupHarness message={{ ...message, content: [first, message.content[1]] } as ThreadMessage} />
+    )
+
+    const summary = () => container.querySelector('[data-tool-summary]')?.textContent
+    await waitFor(() => expect(summary()).toContain('Loaded skill'))
+    const named = { ...first, args: { name: 'research-notes' } }
+    rerender(<GroupHarness message={{ ...message, content: [named, message.content[1]] } as ThreadMessage} />)
+    await waitFor(() => expect(summary()).toContain('research-notes'))
   })
 
   // Liveness used to also require an unresolved call, which is false for the
@@ -532,7 +539,7 @@ describe('live tool run', () => {
 
     expect(await screen.findByText('Running 2 commands')).toBeTruthy()
     expect(container.querySelector('[data-tool-ticker]')).not.toBeNull()
-    expect(container.querySelector('[data-tool-summary] button[aria-expanded]')).toBeNull()
+    expect(container.querySelector('[data-tool-summary] button[aria-expanded]')).not.toBeNull()
   })
 
   // The ticker is a one-line window, so a row opened inside it had its output
@@ -662,6 +669,39 @@ describe('flat tool list approval surfacing', () => {
     })
 
     expect(screen.queryByLabelText('Dismiss')).toBeNull()
+  })
+})
+
+describe('tool error explanations', () => {
+  it('keeps lookup misses neutral and exposes actual failures when expanded', async () => {
+    for (const [error, destructive] of [
+      ['File not found: /repo/session-view.ts', false],
+      ['Permission denied reading /repo/session-view.ts', true]
+    ] as const) {
+      const message = completedOnlyMessage()
+
+      assert(message.role === 'assistant')
+
+      const part = message.content[0]!
+
+      assert(part.type === 'tool-call')
+
+      const { container, unmount } = render(
+        <GroupHarness
+          message={{
+            ...message,
+            content: [{ ...part, result: { error }, args: { path: '/repo/session-view.ts' } }]
+          }}
+        />
+      )
+
+      fireEvent.click(await screen.findByText('Read session-view.ts'))
+
+      await waitFor(() => expect(container.textContent).toContain(error))
+      expect(Boolean(container.querySelector('[data-tool-row] .text-destructive'))).toBe(destructive)
+      unmount()
+      $toolDisclosureStates.set({})
+    }
   })
 })
 

@@ -111,7 +111,7 @@ export function AutoField({
           <FieldHint schema={schema} schemaKey={schemaKey} />
         </div>
         <Switch
-          checked={schema.inverted ? !Boolean(value) : Boolean(value)}
+          checked={schema.inverted ? !value : Boolean(value)}
           onCheckedChange={(checked) => onChange(schema.inverted ? !checked : checked)}
         />
       </div>

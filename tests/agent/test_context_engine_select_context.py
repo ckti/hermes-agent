@@ -21,10 +21,10 @@ from unittest.mock import MagicMock
 from agent.context_engine import ContextEngine
 from agent.conversation_loop import (
     _apply_context_engine_selection,
-    _apply_local_context_mode,
-    _apply_system_prompt_mode,
     _notify_context_engine_turn_complete,
 )
+
+from agent.turn_request_assembly import _apply_local_context_mode, _apply_system_prompt_mode
 
 
 class _MinimalEngine(ContextEngine):

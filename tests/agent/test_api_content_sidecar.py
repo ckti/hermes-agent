@@ -446,11 +446,11 @@ def wire_env():
     db = SessionDB(db_path=Path(test_home) / "state.db")
     sid = "sess-wire"
 
-    def make_agent():
+    def make_agent(enabled_toolsets=None):
         agent = AIAgent(
             api_key="test-key", base_url=f"http://127.0.0.1:{port}/v1",
             provider="openai-compat", model="test-model",
-            max_iterations=10, enabled_toolsets=[],
+            max_iterations=10, enabled_toolsets=enabled_toolsets or [],
             quiet_mode=True, skip_context_files=True, skip_memory=True,
             save_trajectories=False, platform="cli",
             session_db=db, session_id=sid,
@@ -484,6 +484,58 @@ def _chat_requests(handler) -> list:
 
 def _user_messages(req: dict) -> list:
     return [m for m in req.get("messages", []) if m.get("role") == "user"]
+
+
+@pytest.mark.parametrize("full_history", [True, False])
+@pytest.mark.parametrize("system_prompt", [True, False])
+@pytest.mark.parametrize("tool_definitions", [True, False])
+def test_context_payload_controls_reach_wire_without_losing_history(
+    wire_env, tmp_path, full_history, system_prompt, tool_definitions,
+):
+    from pathlib import Path
+    import yaml
+
+    make_agent, handler, db, sid = wire_env
+    settings = {
+        "send_full_history": full_history,
+        "send_system_prompt": system_prompt,
+        "send_tool_definitions": tool_definitions,
+    }
+    (Path(os.environ["HERMES_HOME"]) / "config.yaml").write_text(
+        yaml.safe_dump({"context": settings}), encoding="utf-8"
+    )
+    tool_file = tmp_path / "payload.txt"
+    tool_file.write_text("TOOL-RESULT-MARKER", encoding="utf-8")
+    agent = make_agent(enabled_toolsets=["file"])
+    try:
+        assert all(getattr(agent, key) is value for key, value in settings.items())
+        first = agent.run_conversation("OLD-TURN-MARKER", system_message="PAYLOAD-SYSTEM")
+        assert not first.get("failed")
+        handler.captured_requests.clear()
+        if tool_definitions:
+            handler.response_queue.append(_tc_resp("read_file", json.dumps({"path": str(tool_file)})))
+        handler.response_queue.append(_text_resp("FINAL-ANSWER"))
+        result = agent.run_conversation(
+            "ACTIVE-TURN-MARKER", conversation_history=first["messages"],
+            system_message="PAYLOAD-SYSTEM",
+        )
+        assert result["final_response"] == "FINAL-ANSWER"
+        requests = _chat_requests(handler)
+        assert len(requests) == (2 if tool_definitions else 1)
+        for request in requests:
+            users = json.dumps(_user_messages(request))
+            assert ("OLD-TURN-MARKER" in users) is full_history
+            assert "ACTIVE-TURN-MARKER" in users
+            assert any(m["role"] in {"system", "developer"} for m in request["messages"]) is system_prompt
+            assert bool(request.get("tools")) is tool_definitions
+        if tool_definitions:
+            assert any(m["role"] == "tool" and "TOOL-RESULT-MARKER" in str(m["content"])
+                       for m in requests[-1]["messages"])
+        stored = json.dumps(db.get_messages_as_conversation(sid))
+        assert "OLD-TURN-MARKER" in stored and "ACTIVE-TURN-MARKER" in stored
+        assert "FINAL-ANSWER" in stored
+    finally:
+        agent.close()
 
 
 class TestWireInvariant:
@@ -863,22 +915,23 @@ class TestMaxIterationsSummaryReplay:
         class _Completions:
             def create(self, **kwargs):
                 captured.update(kwargs)
-                return "RAW-RESPONSE"
+                return types.SimpleNamespace(
+                    choices=[types.SimpleNamespace(
+                        message=types.SimpleNamespace(content="SUMMARY", tool_calls=None),
+                        finish_reason="stop",
+                    )],
+                )
 
         client = types.SimpleNamespace(
             chat=types.SimpleNamespace(completions=_Completions())
         )
-        transport = types.SimpleNamespace(
-            normalize_response=lambda _r: types.SimpleNamespace(content="SUMMARY")
-        )
-
         messages = [
             {"role": "user", "content": "q1", "api_content": "q1\n\nPLUGIN-CTX"},
             {"role": "assistant", "content": "a1"},
         ]
         with patch.object(
             agent, "_ensure_primary_openai_client", return_value=client
-        ), patch.object(agent, "_get_transport", return_value=transport):
+        ):
             out = handle_max_iterations(agent, messages, 5)
 
         assert out == "SUMMARY"
