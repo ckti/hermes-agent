@@ -289,9 +289,15 @@ def compress_after_tool_results(
     elif _compressor.last_prompt_tokens == -1:
         _real_tokens = 0
     else:
+        _tools_for_pressure = (
+            agent.tools
+            if getattr(agent, "send_tool_definitions", True) is not False
+            else []
+        )
         _real_tokens = _midturn_request_pressure_tokens(
             agent, messages, active_system_prompt or "",
-            estimate_request_tokens_rough(messages, tools=agent.tools or None),
+            estimate_request_tokens_rough(messages, tools=_tools_for_pressure or None),
+            _tools_for_pressure,
         )
 
     if agent.compression_enabled and compression_attempts < max_compression_attempts:
